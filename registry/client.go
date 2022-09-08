@@ -57,7 +57,7 @@ func (suh serviceUpdateHanlder) ServeHTTP(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("Updated received %v\n", p)
+	fmt.Printf("Updated received %v\n", p) //输出表示收到更新
 	prov.Update(p)
 }
 func ShutdownService(url string) error {

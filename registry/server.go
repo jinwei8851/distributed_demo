@@ -24,12 +24,51 @@ func (r *registry) add(reg Registration) error {
 	r.mutex.Unlock()
 	//注册产生依赖的服务请求过来
 	err := r.sendRequiredServices(reg)
+	r.notify(patch{
+		Added: []patchEntry{
+			patchEntry{
+				Name: reg.ServiceName,
+				URL:  reg.ServiceURL,
+			},
+		},
+	}) //参数就是patch，里面是注册的url
 	if err != nil {
 		return err
 	}
 	return nil
 }
+func (r registry) notify(fullPatch patch) { //patch一次更新有很多条目，可以goroutine并发的发送通知
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	for _, reg := range r.registrations { //从已经注册的依赖项存不存在，存在就通知，移除需要的服务
+		go func(reg Registration) {
+			for _, reqService := range reg.RequiredServices {
+				p := patch{Added: []patchEntry{}, Removed: []patchEntry{}}
+				sendUpdate := false
+				for _, added := range fullPatch.Added { //如果添加的服务就是依赖项 ，然后发送更新
+					if added.Name == reqService {
+						p.Added = append(p.Added, added)
+						sendUpdate = true
+					}
+				}
+				for _, removed := range fullPatch.Removed { //
+					if removed.Name == reqService {
+						p.Removed = append(p.Removed, removed)
+						sendUpdate = true
+					}
+				}
+				if sendUpdate { //如果变化
+					err := r.sendPatch(p, reg.ServiceUpdateURL)
+					if err != nil {
+						log.Println(err)
+						return
+					}
+				}
 
+			}
+		}(reg)
+	}
+}
 func (r registry) sendRequiredServices(reg Registration) error {
 	r.mutex.RLock() //建立读锁
 	defer r.mutex.RUnlock()
@@ -67,14 +106,14 @@ func (r registry) sendPatch(p patch, url string) error {
 func (r *registry) remove(url string) error {
 	for i := range reg.registrations {
 		if reg.registrations[i].ServiceURL == url {
-			//r.notify(patch{
-			//	Removed: []patchEntry{
-			//		{
-			//			Name: r.registrations[i].ServiceName,
-			//			URL:  r.registrations[i].ServiceURL,
-			//		},
-			//	},
-			//})
+			r.notify(patch{
+				Removed: []patchEntry{
+					{
+						Name: r.registrations[i].ServiceName,
+						URL:  r.registrations[i].ServiceURL,
+					},
+				},
+			})
 			r.mutex.Lock()
 			reg.registrations = append(reg.registrations[:i], reg.registrations[i+1:]...) //开闭区间，不要元素i
 			r.mutex.Unlock()
